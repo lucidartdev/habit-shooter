@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useMemo, useState } from "react";
 import HabitCreator from "../components/HabitCreator";
@@ -16,23 +16,23 @@ import { addXp, xpForDisplay, getLevelFromXp } from "../lib/xp";
 
 export default function HomePage() {
   // single source of truth (loaded/saved to localStorage)
-  const [state, setState] = useState(loadState());
+  const [state, setState] = useState(() => {
+    const loaded = loadState();
+    const s = resetCompletionsIfNewDay(loaded);
+    if (s !== loaded) {
+      saveState(s);
+    }
+    return s;
+  });
 
   // positions for targets (in viewport coords)
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
 
   // trigger a re-render every second to move targets
   useEffect(() => {
-    // on mount, ensure daily reset
-    const s = resetCompletionsIfNewDay(state);
-    if (s !== state) {
-      setState(s);
-      saveState(s);
-    }
-
     // init positions
     const pos: Record<string, { x: number; y: number }> = {};
-    for (const h of s.habits) {
+    for (const h of state.habits) {
       pos[h.id] = randomPos();
     }
     setPositions(pos);
