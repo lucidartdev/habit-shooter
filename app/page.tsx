@@ -1,65 +1,134 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useState } from "react";
+import HabitCreator from "../components/HabitCreator";
+import HabitTarget from "../components/HabitTarget";
+import LevelDisplay from "../components/LevelDisplay";
+import {
+  loadState,
+  saveState,
+  createHabit,
+  markHabitCompleted,
+  resetCompletionsIfNewDay,
+  Habit
+} from "../lib/habits";
+import { addXp, xpForDisplay, getLevelFromXp } from "../lib/xp";
+
+export default function HomePage() {
+  // single source of truth (loaded/saved to localStorage)
+  const [state, setState] = useState(loadState());
+
+  // positions for targets (in viewport coords)
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+
+  // trigger a re-render every second to move targets
+  useEffect(() => {
+    // on mount, ensure daily reset
+    const s = resetCompletionsIfNewDay(state);
+    if (s !== state) {
+      setState(s);
+      saveState(s);
+    }
+
+    // init positions
+    const pos: Record<string, { x: number; y: number }> = {};
+    for (const h of s.habits) {
+      pos[h.id] = randomPos();
+    }
+    setPositions(pos);
+
+    const interval = setInterval(() => {
+      setPositions((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          next[id] = randomPos();
+        }
+        return next;
+      });
+    }, 2000);
+
+    // daily midnight reset check
+    const dayCheck = setInterval(() => {
+      setState((cur) => {
+        const updated = resetCompletionsIfNewDay(cur);
+        if (updated !== cur) {
+          saveState(updated);
+          return updated;
+        }
+        return cur;
+      });
+    }, 60_000);
+
+    return () => { clearInterval(interval); clearInterval(dayCheck); };
+  }, []); // eslint-disable-line
+
+  // helper: add habit
+  const handleCreate = (name: string) => {
+    const next = createHabit(state, name);
+    setState(next);
+    // add initial random pos
+    setPositions((p) => ({ ...p, [next.habits[next.habits.length - 1].id]: randomPos() }));
+    saveState(next);
+  };
+
+  // shoot target: mark completed for today and give xp
+  const handleShoot = (habit: Habit) => {
+    if (habit.completedToday) return;
+    const next = markHabitCompleted(state, habit.id);
+    const xpGain = 10;
+    const xpUpdated = addXp(next, xpGain);
+    setState(xpUpdated);
+    saveState(xpUpdated);
+  };
+
+  const level = useMemo(() => getLevelFromXp(state.xp), [state.xp]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div>
+      <header className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Habit Shooter</h1>
+        <LevelDisplay xp={state.xp} level={level} />
+      </header>
+
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-1">
+          <div className="bg-white p-4 rounded shadow">
+            <h2 className="font-semibold mb-2">Create Habit</h2>
+            <HabitCreator onCreate={handleCreate} />
+            <hr className="my-4" />
+            <div className="text-sm text-gray-600">
+              <p><strong>XP:</strong> {xpForDisplay(state.xp)}</p>
+              <p><strong>Total check-ins:</strong> {state.totalCompletions}</p>
+              <p className="mt-2 text-xs text-gray-500">Click a target to complete today’s habit. Targets move every 2s.</p>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+
+        <div className="md:col-span-2 relative h-[60vh] bg-gradient-to-b from-white to-slate-50 border rounded overflow-hidden">
+          {state.habits.length === 0 ? (
+            <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+              No habits yet — create one!
+            </div>
+          ) : null}
+
+          {state.habits.map((h) => (
+            <HabitTarget
+              key={h.id}
+              habit={h}
+              stylePos={positions[h.id]}
+              onShoot={() => handleShoot(h)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          ))}
         </div>
-      </main>
+      </section>
     </div>
   );
+}
+
+// returns a random position inside visible play area (percentage)
+function randomPos() {
+  // keep some padding
+  const x = Math.floor(8 + Math.random() * 84);
+  const y = Math.floor(8 + Math.random() * 84);
+  return { x, y };
 }
